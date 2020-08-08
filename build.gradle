@@ -1,0 +1,24 @@
+plugins {
+    id "org.jetbrains.kotlin.jvm" version "1.3.71"
+    id "org.jetbrains.kotlin.plugin.serialization" version "1.3.71"
+}
+
+group "org.example"
+version "0.0.1"
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+    implementation "org.jetbrains.kotlin:kotlin-reflect:1.3.71"
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-runtime:0.20.0"
+    implementation "commons-io:commons-io:2.6" // for recursively getting all files
+    implementation "commons-codec:commons-codec:1.14" // for hashsums
+    implementation "org.apache.commons:commons-compress:1.20" // for the TARing
+}
+
+compileKotlin {
+    kotlinOptions.jvmTarget = "1.8"
+}
