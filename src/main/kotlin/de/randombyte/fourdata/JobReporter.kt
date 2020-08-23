@@ -23,13 +23,12 @@ abstract class JobReporter {
 
     sealed class Result {
         object Success : Result()
-        class Error(val message: String) : Result()
         object StoppedByUser : Result()
         object ArchiveAlreadyExists : Result()
         object ArchiveNotFound : Result()
 
         sealed class TypedResult<T>(val value: T) : Result() {
-            sealed class MessageResult(message: String) : TypedResult<String>(message) {
+            sealed class MessageResult(val message: String) : TypedResult<String>(message) {
                 class GenericError(message: String) : MessageResult(message)
                 class FileNotFound(message: String) : MessageResult(message)
                 class CanNotReadArchiveEntry(message: String) : MessageResult(message)

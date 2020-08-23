@@ -1,21 +1,13 @@
 package de.randombyte.fourdata.gui
 
 import de.randombyte.fourdata.FourData
-import de.randombyte.fourdata.JobReporter
-import de.randombyte.fourdata.JobReporter.Result.ArchiveAlreadyExists
-import de.randombyte.fourdata.JobReporter.Result.Success
 import de.randombyte.fourdata.JobReporter.Result.TypedResult.ArchiveCreated
-import de.randombyte.fourdata.JobReporter.Result.TypedResult.MessageResult.GenericError
 import de.randombyte.fourdata.archive.Archive
 import de.randombyte.fourdata.archive.ArchivesStorage
 import de.randombyte.fourdata.error
-import de.randombyte.fourdata.info
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
-import javax.swing.JButton
-import javax.swing.JFrame
-import javax.swing.JOptionPane
-import javax.swing.JPanel
+import javax.swing.*
 import kotlin.system.exitProcess
 
 class Gui(val fourData: FourData) {
@@ -28,6 +20,8 @@ class Gui(val fourData: FourData) {
     lateinit var sourceFolderSelectionPanel: FolderSelectionPanel
     lateinit var archivesFolderSelectionPanel: FolderSelectionPanel
     lateinit var archiveFolderSelectionPanel: FolderSelectionPanel
+    lateinit var messagesTextbox: JTextArea
+    lateinit var progressBar: JProgressBar
 
     init {
         setup()
@@ -70,43 +64,13 @@ class Gui(val fourData: FourData) {
                     }
 
                     val archivesStorage = ArchivesStorage(archivesFolderSelectionPanel.folder)
-                    archivesStorage.createNewArchive(sourceFolderSelectionPanel.folder, object : JobReporter() {
-                        override fun onProgress(current: Int, total: Int) {
-                            println("Progress: $current / $total")
-                        }
-
+                    archivesStorage.createNewArchive(sourceFolderSelectionPanel.folder, object : GuiJobReporter(progressBar, messagesTextbox) {
                         override fun onEnd(result: Result) {
+                            super.onEnd(result)
+
                             when (result) {
                                 is ArchiveCreated -> {
-                                    info("Packed archive! Updating database...")
-                                    result.archive.updateDatabase(object : JobReporter() {
-                                        override fun onProgress(current: Int, total: Int) {
-                                            println("Progress: $current / $total")
-                                        }
-
-                                        override fun onEnd(result: Result) {
-                                            when (result) {
-                                                is Result.ArchiveNotFound -> {
-                                                    println("Archive not found!")
-                                                }
-                                                is Success -> {
-                                                    println("Done")
-                                                }
-                                                else -> {
-                                                    info("${result::class.simpleName}")
-                                                }
-                                            }
-                                        }
-                                    })
-                                }
-                                is ArchiveAlreadyExists -> {
-                                    error("Archive already exists!")
-                                }
-                                is GenericError -> {
-                                    error(result.value)
-                                }
-                                else -> {
-                                    info("${result::class.simpleName}")
+                                    result.archive.updateDatabase(GuiJobReporter(progressBar, messagesTextBox))
                                 }
                             }
                         }
@@ -128,26 +92,21 @@ class Gui(val fourData: FourData) {
                         return@addActionListener
                     }
 
-                    archive!!.updateDatabase(object : JobReporter() {
-                        override fun onProgress(current: Int, total: Int) {
-                            println("Progress: $current / $total")
-                        }
-
-                        override fun onEnd(result: Result) {
-                            when (result) {
-                                is Result.ArchiveNotFound -> {
-                                    println("Archive not found!")
-                                }
-                                is Success -> {
-                                    println("Done")
-                                }
-                                else -> {
-                                    info("${result::class.simpleName}")
-                                }
-                            }
-                        }
-                    })
+                    archive!!.updateDatabase(GuiJobReporter(progressBar, messagesTextbox))
                 }
+            }
+
+            messagesTextbox = create<JTextArea> {
+                rows = 5
+                columns = 20
+                isEditable = false
+            }
+
+            progressBar = create<JProgressBar> {
+                minimum = 0
+                maximum = 1
+                isEnabled = false
+                value = 0
             }
         }
     }
