@@ -1,13 +1,12 @@
 package de.randombyte.fourdata
 
-import de.randombyte.fourdata.ArchiveEntriesDatabase.FileEntry
-import de.randombyte.fourdata.TarArchiver.Result.Success
-import de.randombyte.fourdata.TarArchiver.Result.TypedResult.MessageResult.FileNotFound
+import de.randombyte.fourdata.JobReporter.Result.ArchiveAlreadyExists
+import de.randombyte.fourdata.JobReporter.Result.Success
+import de.randombyte.fourdata.JobReporter.Result.TypedResult.MessageResult.FileNotFound
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream.BIGNUMBER_POSIX
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream.LONGFILE_POSIX
-import org.apache.commons.io.FileUtils
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.InputStream
@@ -15,31 +14,13 @@ import java.io.OutputStream
 
 object TarArchiver {
 
-    sealed class Result {
-        object Success : Result()
-        object StoppedByUser : Result()
-        object ArchiveAlreadyExists : Result()
-        object ArchiveNotFound : Result()
-
-        sealed class TypedResult<T>(val result: T) : Result() {
-            sealed class MessageResult(message: String) : TypedResult<String>(message) {
-                class FileNotFound(message: String) : MessageResult(message)
-                class CanNotReadArchiveEntry(message: String) : MessageResult(message)
-            }
-
-            class FileEntries(val entries: List<FileEntry>) : TypedResult<List<FileEntry>>(entries)
-        }
-    }
-
-    fun archive(source: File, target: File, jobReporter: JobReporter) = stoppableThread {
+    fun archive(sourceRoot: File, sourceFilesRelativeToRoot: List<File>, target: File, jobReporter: JobReporter) = stoppableThread {
         if (target.exists()) {
-            jobReporter.end(Result.ArchiveAlreadyExists)
+            jobReporter.end(ArchiveAlreadyExists)
             return@stoppableThread
         }
 
         try {
-            val files = FileUtils.listFiles(source, null, true)
-
             target.outputStream().buffered().tar().use { outputStream ->
                 // setup archive
                 outputStream.apply {
@@ -49,16 +30,22 @@ object TarArchiver {
                 }
 
                 // add entries
-                files.forEachIndexedStoppable { index, file ->
-                    val archiveEntry = outputStream.createArchiveEntry(file, file.pathWithoutRoot(source))
+                sourceFilesRelativeToRoot.forEachIndexedStoppable { index, fileRelativeToRoot ->
+                    val fullyQualifiedFile = sourceRoot.resolve(fileRelativeToRoot)
+                    val archiveEntry = outputStream.createArchiveEntry(fullyQualifiedFile, fileRelativeToRoot.path)
                     outputStream.putArchiveEntry(archiveEntry)
-                    file.inputStream().use { it.copyTo(outputStream) }
+                    fullyQualifiedFile.inputStream().use { it.copyTo(outputStream) }
                     outputStream.closeArchiveEntry()
 
-                    jobReporter.progress(index + 1, files.size)
+                    jobReporter.progress(index + 1, sourceFilesRelativeToRoot.size)
 
                     return@forEachIndexedStoppable stopped
                 }
+            }
+
+            if (stopped) {
+                jobReporter.end(JobReporter.Result.StoppedByUser)
+                return@stoppableThread
             }
 
             jobReporter.end(Success)
@@ -70,4 +57,3 @@ object TarArchiver {
 
 fun OutputStream.tar() = TarArchiveOutputStream(this)
 fun InputStream.tar() = TarArchiveInputStream(this)
-fun File.pathWithoutRoot(root: File) = canonicalPath.removePrefix(root.canonicalPath)

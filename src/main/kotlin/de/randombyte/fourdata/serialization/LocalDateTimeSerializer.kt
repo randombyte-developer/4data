@@ -8,21 +8,14 @@ import java.time.format.DateTimeFormatter
 object LocalDateTimeSerializer : KSerializer<LocalDateTime> {
     val dateTimeFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd-HH-mm-ss")
 
-    fun deserialize(string: String) = LocalDateTime.parse(string,
-        dateTimeFormatter
-    )
+    fun deserialize(string: String) = LocalDateTime.parse(string, dateTimeFormatter)
     fun serialize(localDateTime: LocalDateTime) = localDateTime.format(dateTimeFormatter)
 
     override val descriptor = PrimitiveDescriptor("LocalDateTime", PrimitiveKind.STRING)
 
-    override fun deserialize(decoder: Decoder) =
-        deserialize(decoder.decodeString())
+    override fun deserialize(decoder: Decoder) = deserialize(decoder.decodeString())
 
     override fun serialize(encoder: Encoder, value: LocalDateTime) {
-        encoder.encodeString(
-            serialize(
-                value
-            )
-        )
+        encoder.encodeString(serialize(value))
     }
 }

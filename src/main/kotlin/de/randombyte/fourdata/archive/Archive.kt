@@ -2,7 +2,10 @@
 package de.randombyte.fourdata.archive
 
 import de.randombyte.fourdata.JobReporter
-import de.randombyte.fourdata.TarArchiver
+import de.randombyte.fourdata.JobReporter.Result.ArchiveNotFound
+import de.randombyte.fourdata.JobReporter.Result.Success
+import de.randombyte.fourdata.JobReporter.Result.TypedResult.FileEntries
+import de.randombyte.fourdata.JobReporter.Result.TypedResult.MessageResult.CanNotReadArchiveEntry
 import de.randombyte.fourdata.serialization.LocalDateTimeSerializer
 import de.randombyte.fourdata.serialization.json
 import de.randombyte.fourdata.stoppableThread
@@ -10,8 +13,8 @@ import de.randombyte.fourdata.tar
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 import org.apache.commons.codec.digest.DigestUtils
+import org.apache.commons.compress.archivers.ArchiveEntry
 import java.io.File
-import java.io.FileNotFoundException
 import java.time.LocalDateTime
 import java.time.format.DateTimeParseException
 
@@ -37,13 +40,7 @@ class Archive(val timestamp: LocalDateTime, val archiveFile: File, val databaseF
     }
 
     @Serializable
-    class Database(val lastUpdated: LocalDateTime, val entries: List<ArchiveEntry>)
-
-    @Serializable
-    class ArchiveEntry(val path: String, val md5Sum: String) {
-        fun isSamePath(other: ArchiveEntry) = path == other.path
-        fun isSameMd5Sum(other: ArchiveEntry) = md5Sum == other.md5Sum
-    }
+    class Database(val lastUpdated: LocalDateTime, val entries: List<FileEntry>)
 
     val hasDatabase get() = databaseFile.exists()
 
@@ -56,16 +53,13 @@ class Archive(val timestamp: LocalDateTime, val archiveFile: File, val databaseF
         collectEntriesFromArchiveFile(object : JobReporter() {
             override fun onProgress(current: Int, total: Int) = jobReporter.progress(current, total)
 
-            override fun onEnd(result: TarArchiver.Result) {
+            override fun onEnd(result: Result) {
                 when (result) {
-                    is TarArchiver.Result.TypedResult.FileEntries -> {
-                        val archiveDatabase = Database(
-                            LocalDateTime.now(),
-                            result.entries
-                        )
+                    is FileEntries -> {
+                        val archiveDatabase = Database(LocalDateTime.now(), result.entries)
                         val databaseString = json.stringify(Database.serializer(), archiveDatabase)
                         databaseFile.writeText(databaseString)
-                        jobReporter.end(TarArchiver.Result.Success)
+                        jobReporter.end(Success)
                     }
                     else -> jobReporter.end(result)
                 }
@@ -73,49 +67,30 @@ class Archive(val timestamp: LocalDateTime, val archiveFile: File, val databaseF
         })
     }
 
-    private fun collectEntriesFromArchiveFile(jobReporter: JobReporter) =
-        stoppableThread {
-            val fileEntries = mutableListOf<ArchiveEntry>()
+    private fun collectEntriesFromArchiveFile(jobReporter: JobReporter) = stoppableThread {
+        val fileEntries = mutableListOf<FileEntry>()
 
-            var error = false
-
-            try {
-                archiveFile.inputStream().buffered().tar().use { inputStream ->
-                    var archiveEntry: org.apache.commons.compress.archivers.ArchiveEntry? = inputStream.nextTarEntry
-                    while (archiveEntry != null) {
-                        if (!inputStream.canReadEntryData(archiveEntry)) {
-                            jobReporter.end(
-                                TarArchiver.Result.TypedResult.MessageResult.CanNotReadArchiveEntry(
-                                    "Can't read archive entry '${archiveEntry.name}' of size ${archiveEntry.size}!"
-                                )
-                            )
-                            error = true
-                            break
-                        }
-
-                        if (!archiveEntry.isDirectory) {
-                            fileEntries += ArchiveEntry(
-                                archiveEntry.name,
-                                DigestUtils.md5Hex(inputStream)
-                            )
-                            jobReporter.progress(
-                                fileEntries.size,
-                                JobReporter.UNKNOWN_TOTAL
-                            )
-                        }
-
-                        archiveEntry = inputStream.nextTarEntry
-                    }
-                }
-            } catch (fileNotFoundException: FileNotFoundException) {
-                jobReporter.end(TarArchiver.Result.ArchiveNotFound)
-                error = true
-            }
-
-            if (!error) jobReporter.end(
-                TarArchiver.Result.TypedResult.FileEntries(
-                    fileEntries
-                )
-            )
+        if (!archiveFile.exists()) {
+            jobReporter.end(ArchiveNotFound)
+            return@stoppableThread
         }
+        archiveFile.inputStream().buffered().tar().use { inputStream ->
+            var archiveEntry: ArchiveEntry? = inputStream.nextTarEntry
+            while (archiveEntry != null) {
+                if (!inputStream.canReadEntryData(archiveEntry)) {
+                    jobReporter.end(CanNotReadArchiveEntry("Can't read archive entry '${archiveEntry.name}' of size ${archiveEntry.size}!"))
+                    return@stoppableThread
+                }
+
+                if (!archiveEntry.isDirectory) {
+                    fileEntries += FileEntry(archiveEntry.name, DigestUtils.md5Hex(inputStream))
+                    jobReporter.progress(fileEntries.size, JobReporter.UNKNOWN_TOTAL)
+                }
+
+                archiveEntry = inputStream.nextTarEntry
+            }
+        }
+
+        jobReporter.end(FileEntries(fileEntries))
+    }
 }

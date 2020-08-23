@@ -2,12 +2,16 @@ package de.randombyte.fourdata.gui
 
 import de.randombyte.fourdata.FourData
 import de.randombyte.fourdata.JobReporter
-import de.randombyte.fourdata.TarArchiver.Result
-import de.randombyte.fourdata.TarArchiver.Result.ArchiveAlreadyExists
-import de.randombyte.fourdata.TarArchiver.Result.Success
+import de.randombyte.fourdata.JobReporter.Result.ArchiveAlreadyExists
+import de.randombyte.fourdata.JobReporter.Result.Success
+import de.randombyte.fourdata.JobReporter.Result.TypedResult.ArchiveCreated
+import de.randombyte.fourdata.JobReporter.Result.TypedResult.MessageResult.GenericError
+import de.randombyte.fourdata.archive.Archive
+import de.randombyte.fourdata.archive.ArchivesStorage
+import de.randombyte.fourdata.error
+import de.randombyte.fourdata.info
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
-import java.io.File
 import javax.swing.JButton
 import javax.swing.JFrame
 import javax.swing.JOptionPane
@@ -23,6 +27,7 @@ class Gui(val fourData: FourData) {
     val window = JFrame()
     lateinit var sourceFolderSelectionPanel: FolderSelectionPanel
     lateinit var archivesFolderSelectionPanel: FolderSelectionPanel
+    lateinit var archiveFolderSelectionPanel: FolderSelectionPanel
 
     init {
         setup()
@@ -30,7 +35,7 @@ class Gui(val fourData: FourData) {
     }
 
     private fun setup() {
-        window.setSize(400, 300)
+        window.setSize(500, 400)
         window.defaultCloseOperation = JFrame.DO_NOTHING_ON_CLOSE
         window.addWindowListener(object : WindowAdapter() {
             override fun windowClosing(e: WindowEvent?) {
@@ -48,60 +53,100 @@ class Gui(val fourData: FourData) {
         })
 
         window.contentPane = JPanel().verticalLayout {
-            sourceFolderSelectionPanel = addComponent(FolderSelectionPanel("Backup folder:", COMPONENT_HEIGHT))
-            archivesFolderSelectionPanel = addComponent(FolderSelectionPanel("Archives folder:", COMPONENT_HEIGHT))
+            sourceFolderSelectionPanel = addComponent(FolderSelectionPanel("Source folder:", COMPONENT_HEIGHT))
+            archivesFolderSelectionPanel = addComponent(FolderSelectionPanel("Archives storage folder:", COMPONENT_HEIGHT))
+            archiveFolderSelectionPanel = addComponent(FolderSelectionPanel("Archive folder:", COMPONENT_HEIGHT))
 
             create<JButton> {
                 text = "Start Backup"
                 addActionListener {
-                    fourData.backup(
-                        File("/home/randombyte/Downloads/tmp/source"),
-                        File("/home/randombyte/Downloads/tmp/archives"),
-                        object : JobReporter() {
-                            override fun onProgress(current: Int, total: Int) {
-                                println("Progress: $current / $total")
-                            }
+                    if (!sourceFolderSelectionPanel.folder.exists()) {
+                        error("Select a valid source folder!")
+                        return@addActionListener
+                    }
+                    if (!archivesFolderSelectionPanel.folder.exists()) {
+                        error("Select a valid destination folder!")
+                        return@addActionListener
+                    }
 
-                            override fun onEnd(result: Result) {
-                                when (result) {
-                                    is ArchiveAlreadyExists -> {
-                                        println("Archive already exists!")
-                                    }
-                                    else -> {
-                                        println("Done")
-                                    }
+                    val archivesStorage = ArchivesStorage(archivesFolderSelectionPanel.folder)
+                    archivesStorage.createNewArchive(sourceFolderSelectionPanel.folder, object : JobReporter() {
+                        override fun onProgress(current: Int, total: Int) {
+                            println("Progress: $current / $total")
+                        }
+
+                        override fun onEnd(result: Result) {
+                            when (result) {
+                                is ArchiveCreated -> {
+                                    info("Packed archive! Updating database...")
+                                    result.archive.updateDatabase(object : JobReporter() {
+                                        override fun onProgress(current: Int, total: Int) {
+                                            println("Progress: $current / $total")
+                                        }
+
+                                        override fun onEnd(result: Result) {
+                                            when (result) {
+                                                is Result.ArchiveNotFound -> {
+                                                    println("Archive not found!")
+                                                }
+                                                is Success -> {
+                                                    println("Done")
+                                                }
+                                                else -> {
+                                                    info("${result::class.simpleName}")
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
+                                is ArchiveAlreadyExists -> {
+                                    error("Archive already exists!")
+                                }
+                                is GenericError -> {
+                                    error(result.value)
+                                }
+                                else -> {
+                                    info("${result::class.simpleName}")
                                 }
                             }
                         }
-                    )
-                    //fourData.startBackup(sourceFolderSelectionPanel.folder, archivesFolderSelectionPanel.folder)
+                    })
                 }
             }
 
             create<JButton> {
                 text = "Update database"
                 addActionListener {
-                    fourData.updateExternalFileEntriesDatabase(
-                        File("/home/randombyte/Downloads/tmp/tmp.tar"),
-                        File("/home/randombyte/Downloads/tmp/tmp.json"),
-                        object : JobReporter() {
-                            override fun onProgress(current: Int, total: Int) {
-                                println("Progress: $current / $total")
-                            }
 
-                            override fun onEnd(result: Result) {
-                                when (result) {
-                                    is Result.ArchiveNotFound -> {
-                                        println("Archive not found!")
-                                    }
-                                    is Success -> {
-                                        println("Done")
-                                    }
+                    var validArchive = true
+                    if (!archiveFolderSelectionPanel.folder.exists()) validArchive = false
+                    val archive = Archive.fromArchiveRootFolder(archiveFolderSelectionPanel.folder)
+                    if (archive == null) validArchive = false
+
+                    if (!validArchive) {
+                        error("Select a valid archive folder!")
+                        return@addActionListener
+                    }
+
+                    archive!!.updateDatabase(object : JobReporter() {
+                        override fun onProgress(current: Int, total: Int) {
+                            println("Progress: $current / $total")
+                        }
+
+                        override fun onEnd(result: Result) {
+                            when (result) {
+                                is Result.ArchiveNotFound -> {
+                                    println("Archive not found!")
+                                }
+                                is Success -> {
+                                    println("Done")
+                                }
+                                else -> {
+                                    info("${result::class.simpleName}")
                                 }
                             }
                         }
-                    )
-                    //fourData.startBackup(sourceFolderSelectionPanel.folder, archivesFolderSelectionPanel.folder)
+                    })
                 }
             }
         }
